@@ -1,0 +1,20 @@
+# Dados reais do usuário: NUNCA versionar
+dados/
+*.json.bak
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build
+build/
+dist/
+*.spec
+*.exe
+Output_Instalador/
+
+# Editor
+.vscode/
+.idea/
