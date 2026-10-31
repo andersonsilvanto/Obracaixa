@@ -100,6 +100,77 @@ class FinanceiroBaseTests(unittest.TestCase):
         self.assertIn("id", migradas[0])
 
 
+    # --- Cancelamento de acordo (v3.4) ---
+
+    def _agendar(self, nome, valor, data="2026-11-01"):
+        self.fin.adicionar_agendamento(
+            {"nome": nome, "data_inicio": data, "valor_acordado": valor}
+        )
+
+    def test_cancelar_acordo_remove_do_a_receber_sem_mexer_no_saldo(self) -> None:
+        self._agendar("Obra A", 5000.0)
+        self.fin.adicionar_transacao({"tipo": "entrada", "valor": 100.0})
+        cancelada = self.fin.cancelar_agendamento("Obra A")
+        self.assertIsNotNone(cancelada)
+        resumo = self.fin.resumo_financeiro()
+        self.assertEqual(resumo["valor_acordado"], 0)
+        self.assertEqual(resumo["valor_a_receber_obras"], 0)
+        self.assertEqual(resumo["saldo"], 100.0)
+
+    def test_cancelamento_preserva_historico(self) -> None:
+        self._agendar("Obra A", 5000.0)
+        self.fin.cancelar_agendamento("Obra A")
+        transacoes = self.fin.transacoes
+        self.assertEqual(len(transacoes), 1)
+        self.assertEqual(transacoes[0]["tipo"], "agendamento_cancelado")
+        self.assertTrue(transacoes[0]["descricao"].startswith("[CANCELADO]"))
+        self.assertEqual(self.fin.get_acordos_ativos(), [])
+
+    def test_pagamento_recebido_de_obra_cancelada_nao_abate_outra_obra(self) -> None:
+        self._agendar("Obra A", 5000.0)
+        self._agendar("Obra B", 3000.0)
+        self.fin.adicionar_transacao(
+            {"tipo": "pagamento_parcial", "valor": 2000.0, "obra": "Obra A"}
+        )
+        self.fin.cancelar_agendamento("Obra A")
+        resumo = self.fin.resumo_financeiro()
+        self.assertEqual(resumo["valor_acordado"], 3000.0)
+        self.assertEqual(resumo["valor_a_receber_obras"], 3000.0)
+        self.assertEqual(resumo["saldo"], 2000.0)
+
+    def test_cancelar_acordo_inexistente_ou_repetido_retorna_none(self) -> None:
+        self.assertIsNone(self.fin.cancelar_agendamento("Nao existe"))
+        self._agendar("Obra A", 1000.0)
+        self.assertIsNotNone(self.fin.cancelar_agendamento("Obra A"))
+        self.assertIsNone(self.fin.cancelar_agendamento("Obra A"))
+
+    def test_cancelar_por_id_escolhe_o_acordo_correto(self) -> None:
+        self._agendar("Obra A", 1000.0, "2026-11-01")
+        self._agendar("Obra A", 2000.0, "2026-12-01")
+        primeiro, segundo = self.fin.get_acordos_ativos()
+        self.fin.cancelar_agendamento("Obra A", primeiro["id"])
+        restantes = self.fin.get_acordos_ativos()
+        self.assertEqual(len(restantes), 1)
+        self.assertEqual(restantes[0]["id"], segundo["id"])
+        self.assertEqual(self.fin.resumo_financeiro()["valor_acordado"], 2000.0)
+
+    def test_cancelamento_persiste_em_disco_e_marca_a_agenda(self) -> None:
+        self._agendar("Obra A", 1000.0)
+        self.fin.cancelar_agendamento("Obra A")
+        transacoes = json.loads((self.pasta / "transacoes.json").read_text(encoding="utf-8"))
+        agenda = json.loads((self.pasta / "agenda.json").read_text(encoding="utf-8"))
+        self.assertEqual(transacoes[0]["tipo"], "agendamento_cancelado")
+        self.assertTrue(agenda["2026-11"][0]["cancelado"])
+
+    def test_obra_reagendada_depois_do_cancelamento_volta_a_contar(self) -> None:
+        self._agendar("Obra A", 1000.0)
+        self.fin.cancelar_agendamento("Obra A")
+        self._agendar("Obra A", 4000.0, "2026-12-01")
+        resumo = self.fin.resumo_financeiro()
+        self.assertEqual(resumo["valor_acordado"], 4000.0)
+        self.assertEqual(resumo["valor_a_receber_obras"], 4000.0)
+
+
 class PastaDadosTests(unittest.TestCase):
     def test_variavel_de_ambiente_tem_prioridade(self) -> None:
         with patch.dict("os.environ", {"OBRACAIXA_DADOS": "/tmp/meus-dados"}):

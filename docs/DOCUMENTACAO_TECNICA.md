@@ -57,15 +57,22 @@ O erro `_tkinter.TclError: Layout SaidaTFrame not found` foi resolvido em etapas
 | Fim do estilo customizado | 3.3 | Removido o estilo `SaidaTFrame`; uso do `TFrame` padrão. |
 | Cor de fundo explícita | 3.0+ | `tk.Label` recebe `bg` explícito, pois não herda o fundo do `ttk.Frame`. |
 
-## 5. Cancelamento de acordo (versão 3.4 — pendente)
+## 5. Cancelamento de acordo (versão 3.4)
 
-Descrito na documentação original, mas **ausente do código-fonte desta base (v3.3)**:
+Permite cancelar um acordo de obra sem apagar o histórico.
 
-- `abrir_dialogo_cancelamento()`: pergunta qual obra cancelar.
-- `processar_cancelamento_agendamento(nome)`: troca o tipo do `agendamento` para
-  `agendamento_cancelado`.
-- `resumo_financeiro()`: ignora acordos cancelados no "a receber".
-- `atualizar_relatorio()`: mostra a categoria "ACORDO CANCELADO", preservando o histórico.
+| Função | Descrição |
+|---|---|
+| `FinanceiroBase.get_acordos_ativos()` | Lista as transações `agendamento` ainda não canceladas. |
+| `FinanceiroBase.cancelar_agendamento(nome, transacao_id=None)` | Troca o tipo para `agendamento_cancelado`, marca a descrição com `[CANCELADO]` e sinaliza a agenda. Com nomes repetidos, cancela o mais recente ou o `transacao_id` informado. Retorna a transação ou `None`. |
+| `AppFinanceiro.abrir_dialogo_cancelamento()` | Janela com lista dos acordos ativos e confirmação (botão na aba *Agendamento de Obra*). |
+| `AppFinanceiro.processar_cancelamento_agendamento(nome, id)` | Executa o cancelamento e atualiza saldo, relatório e lista de obras. |
+| `resumo_financeiro()` | Ignora acordos cancelados em `valor_acordado` e `valor_a_receber_obras`. |
+| `atualizar_relatorio()` | Mostra a linha como *Acordo Cancelado* / `ACORDO CANCELADO`. |
+
+Regra importante: os pagamentos já recebidos de uma obra cancelada **permanecem no
+saldo**, mas deixam de abater o "a receber" das demais obras. Se a mesma obra for
+agendada de novo, o novo acordo volta a contar normalmente.
 
 ## 6. Empacotamento (Windows)
 

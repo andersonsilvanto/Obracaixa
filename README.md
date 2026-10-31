@@ -13,6 +13,8 @@ Feito em **Python + Tkinter**, usando apenas a biblioteca padrão.
 - **Saldo em caixa** em tempo real (entradas, saídas e ajustes).
 - **Agendamento de obras** com valor acordado; o "a receber" de cada obra é calculado
   automaticamente a partir dos pagamentos parciais.
+- **Cancelamento de acordo**: o valor sai do "a receber", os pagamentos já recebidos
+  continuam no caixa e o histórico é preservado (aparece como *Acordo Cancelado*).
 - **Entradas e saídas por categoria**: combustível, alimentação, almoço/janta,
   funcionário, ferramentas e outros.
 - **Parcelamento**: a 1ª parcela entra no caixa e as demais viram pendências
@@ -56,8 +58,8 @@ Para fazer backup, copie `transacoes.json`, `pendencias.json` e `agenda.json`.
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Cobrem o cálculo de saldo, o "a receber" por obra, o parcelamento, a persistência
-em disco, a migração de dados antigos e a validação de datas.
+Cobrem o cálculo de saldo, o "a receber" por obra, o cancelamento de acordos, o parcelamento,
+a persistência em disco, a migração de dados antigos e a validação de datas.
 
 ## Gerar o executável (Windows)
 
@@ -83,8 +85,6 @@ tipos de transação, mecanismo de parcelamento e decisões de interface.
 
 ## Roadmap
 
-- [ ] Cancelamento de acordo de obra (existe na versão 3.4 documentada; o código-fonte
-      desta base é da 3.3 e a função precisa ser reimplementada).
 - [ ] Exportação em PDF real (ex.: ReportLab).
 - [ ] Aviso de parcelas próximas do vencimento.
 - [ ] Filtro de relatório por obra.

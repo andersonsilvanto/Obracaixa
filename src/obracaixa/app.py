@@ -218,6 +218,47 @@ class FinanceiroBase:
             "origem": "agendamento"
         })
 
+    def get_acordos_ativos(self):
+        """Transações de acordo (agendamento) que ainda não foram canceladas."""
+        return [t for t in self.transacoes if t["tipo"] == "agendamento"]
+
+    def cancelar_agendamento(self, nome, transacao_id=None):
+        """Cancela um acordo de obra sem apagar o histórico.
+
+        O acordo deixa de entrar em "Acordado" e "A Receber"; os pagamentos já
+        recebidos continuam no caixa. Se houver mais de um acordo ativo com o
+        mesmo nome, cancela o mais recente (ou o de ``transacao_id``).
+        Retorna a transação cancelada, ou None se não houver acordo ativo.
+        """
+        nome = (nome or "").strip()
+        candidatos = [
+            t for t in self.get_acordos_ativos()
+            if t["obra"] == nome and (transacao_id is None or t["id"] == transacao_id)
+        ]
+        if not candidatos:
+            return None
+
+        alvo = candidatos[-1]
+        alvo["tipo"] = "agendamento_cancelado"
+        if not alvo["descricao"].startswith("[CANCELADO]"):
+            alvo["descricao"] = f"[CANCELADO] {alvo['descricao']}"
+
+        for lista in self.agenda.values():
+            for item in lista:
+                if (
+                    item.get("nome") == nome
+                    and not item.get("cancelado")
+                    and item.get("valor_acordado") == alvo.get("valor_total_compra")
+                ):
+                    item["cancelado"] = True
+                    break
+            else:
+                continue
+            break
+
+        self.salvar()
+        return alvo
+
     def adicionar_pendencia_parcelada(self, tipo, transacao_base):
         """Adiciona as parcelas restantes como pendências futuras."""
         if transacao_base["parcelas_totais"] <= 1:
@@ -251,6 +292,12 @@ class FinanceiroBase:
         saldo = 0
         valor_acordado = 0
         valor_total_recebido = 0 
+        recebido_de_obras_canceladas = 0
+
+        obras_ativas = {t["obra"] for t in self.transacoes if t["tipo"] == "agendamento"}
+        obras_canceladas = {
+            t["obra"] for t in self.transacoes if t["tipo"] == "agendamento_cancelado"
+        } - obras_ativas
 
         for t in self.transacoes:
             valor = t["valor"]
@@ -267,11 +314,16 @@ class FinanceiroBase:
                 valor_acordado += t.get("valor_total_compra", t["valor"]) 
             elif t["tipo"] == "pagamento_parcial" or t["categoria"] == "Serviço":
                 valor_total_recebido += valor
+                if t["obra"] and t["obra"] in obras_canceladas:
+                    recebido_de_obras_canceladas += valor
 
         valor_a_receber_parcelado = sum(p["valor"] for p in self.pendencias['a_receber'])
         valor_a_pagar_parcelado = sum(p["valor"] for p in self.pendencias['a_pagar'])
 
-        valor_a_receber_obras = max(0, valor_acordado - valor_total_recebido)
+        # Acordos cancelados saem da conta; o que já foi pago por eles não abate outras obras.
+        valor_a_receber_obras = max(
+            0, valor_acordado - (valor_total_recebido - recebido_de_obras_canceladas)
+        )
 
         return {
             "saldo": saldo,
@@ -421,6 +473,57 @@ class AppFinanceiro(tk.Tk):
         
         btn_agendar = tk.Button(frame, text="Agendar e Registrar Valor Acordado", command=self.registrar_agendamento, bg='blue', fg='white')
         btn_agendar.grid(row=8, column=1, sticky='e', padx=5, pady=10)
+
+        btn_cancelar = tk.Button(frame, text="Cancelar Acordo de Obra", command=self.abrir_dialogo_cancelamento, bg='#B22222', fg='white')
+        btn_cancelar.grid(row=9, column=1, sticky='e', padx=5, pady=5)
+
+    def abrir_dialogo_cancelamento(self):
+        ativos = self.financeiro.get_acordos_ativos()
+        if not ativos:
+            messagebox.showinfo("Cancelar Acordo", "Não há acordos de obra ativos para cancelar.")
+            return
+
+        janela = tk.Toplevel(self)
+        janela.title("Cancelar Acordo de Obra")
+        janela.configure(bg=self.COR_FUNDO_PADRAO)
+        janela.transient(self)
+        janela.grab_set()
+
+        tk.Label(janela, text="Selecione o acordo que será cancelado:", font=("Arial", 10), bg=self.COR_FUNDO_PADRAO).pack(padx=15, pady=(15, 5))
+        opcoes = [
+            f"{t['obra']} - {formata_brl(t.get('valor_total_compra', 0.0))} (início {t['data']})"
+            for t in ativos
+        ]
+        combo = ttk.Combobox(janela, values=opcoes, state="readonly", width=60)
+        combo.current(0)
+        combo.pack(padx=15, pady=5)
+
+        def confirmar():
+            alvo = ativos[combo.current()]
+            if messagebox.askyesno(
+                "Confirmar cancelamento",
+                f"Cancelar o acordo da obra '{alvo['obra']}'?\n\n"
+                "O valor sai do 'A Receber'. Pagamentos já recebidos continuam no caixa "
+                "e o histórico é mantido.",
+                parent=janela,
+            ):
+                janela.destroy()
+                self.processar_cancelamento_agendamento(alvo["obra"], alvo["id"])
+
+        botoes = tk.Frame(janela, bg=self.COR_FUNDO_PADRAO)
+        botoes.pack(pady=15)
+        tk.Button(botoes, text="Cancelar acordo", command=confirmar, bg='#B22222', fg='white').pack(side="left", padx=5)
+        tk.Button(botoes, text="Voltar", command=janela.destroy).pack(side="left", padx=5)
+
+    def processar_cancelamento_agendamento(self, nome, transacao_id=None):
+        cancelada = self.financeiro.cancelar_agendamento(nome, transacao_id)
+        if cancelada is None:
+            messagebox.showwarning("Cancelar Acordo", f"Nenhum acordo ativo encontrado para '{nome}'.")
+            return
+        self.lista_obras = self.financeiro.get_lista_obras()
+        self.atualizar_saldo()
+        self.atualizar_relatorio()
+        messagebox.showinfo("Acordo cancelado", f"O acordo da obra '{nome}' foi cancelado e removido do 'A Receber'.")
 
     def registrar_agendamento(self):
         nome = self.entry_vars['agenda_nome'].get().strip()
@@ -1117,12 +1220,15 @@ class AppFinanceiro(tk.Tk):
                 tipo = "Saída"
             elif t['tipo'] == "agendamento":
                 tipo = "Acordo (Futuro)"
+            elif t['tipo'] == "agendamento_cancelado":
+                tipo = "Acordo Cancelado"
+
+            categoria = "ACORDO CANCELADO" if t['tipo'] == "agendamento_cancelado" else (t.get('sub_categoria', '') or t['categoria'])
             
             self.tree.insert("", "end", values=(
                 t['data'],
                 tipo,
-                # CORREÇÃO APLICADA: Usa t.get() para acessar a chave 'sub_categoria'
-                t.get('sub_categoria', '') or t['categoria'],
+                categoria,
                 t['obra'],
                 f"{t['descricao']} (P: {t.get('parcela_atual', 1)}/{t.get('parcelas_totais', 1)})",
                 valor_formatado
@@ -1187,7 +1293,14 @@ class AppFinanceiro(tk.Tk):
                 f.write("-" * 140 + "\n")
                 
                 for t in dados_ordenados:
-                    tipo = "Entrada" if t['tipo'] in ["entrada", "pagamento_parcial", "ajuste_positivo"] else "Saída"
+                    if t['tipo'] in ["entrada", "pagamento_parcial", "ajuste_positivo"]:
+                        tipo = "Entrada"
+                    elif t['tipo'] == "agendamento":
+                        tipo = "Acordo"
+                    elif t['tipo'] == "agendamento_cancelado":
+                        tipo = "Acordo Cancelado"
+                    else:
+                        tipo = "Saída"
                     f.write(
                         f"{t['data']:<12}"
                         f"{tipo:<15}"
